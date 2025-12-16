@@ -1,0 +1,8 @@
+version: "1.0.0"
+description: "User-friendly UDP logger for ESP-IDF: auto-start on IP, hooks ESP_LOGx, broadcast by default, bind-to-me selection, mDNS naming."
+url: "https://github.com/YOUR_GITHUB_USER/esp32-udp-logger"
+license: "MIT"
+tags: [logging, udp, esp-idf, debug, mdns]
+targets: [esp32, esp32s2, esp32s3, esp32c3, esp32c6]
+dependencies:
+  idf: ">=4.4"
