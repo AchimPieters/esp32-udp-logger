@@ -85,19 +85,25 @@ def send_udp_cmd(ip: str, port: int, cmd: str, expect_reply: bool = True, reply_
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.settimeout(reply_timeout_s)
         s.bind(("", 0))
-        s.sendto(cmd_bytes, (ip, port))
-        if not expect_reply:
-            return ""
         try:
-            data, _ = s.recvfrom(2048)
-            return data.decode("utf-8", errors="replace")
-        except socket.timeout:
-            return ""
+            s.sendto(cmd_bytes, (ip, port))
+            if not expect_reply:
+                return ""
+            try:
+                data, _ = s.recvfrom(2048)
+                return data.decode("utf-8", errors="replace")
+            except socket.timeout:
+                return ""
+        except OSError as e:
+            raise SystemExit(f"Network error sending command to {ip}:{port}: {e}") from e
 
 def get_local_ip_for_target(target_ip: str) -> str:
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect((target_ip, 9))
-        return s.getsockname()[0]
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect((target_ip, 9))
+            return s.getsockname()[0]
+    except OSError as e:
+        raise SystemExit(f"Failed to determine local IP for {target_ip}: {e}") from e
 
 def listen_logs(port: int) -> None:
     print(f"Listening for UDP logs on 0.0.0.0:{port} (Ctrl+C to stop)")
