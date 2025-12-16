@@ -1,5 +1,5 @@
 name: "esp32-udp-logger"
-version: "1.0.0"
+version: "1.0.1"
 description: "User-friendly UDP logger for ESP-IDF: auto-start on IP, hooks ESP_LOGx, broadcast by default, bind-to-me selection, mDNS naming."
 url: "https://github.com/YOUR_GITHUB_USER/esp32-udp-logger"
 maintainers:
