@@ -1,0 +1,22 @@
+dependencies:
+  idf: '>=5.4'
+description: 'User-friendly UDP logger for ESP-IDF: auto-start on IP, hooks ESP_LOGx,
+  broadcast by default, bind-to-me selection, mDNS naming.'
+issues: https://github.com/AchimPieters/esp32-udp-logger/issues
+license: MIT
+maintainers:
+- info@studiopieters.nl
+repository: https://github.com/AchimPieters/esp32-udp-logger
+targets:
+- esp32
+- esp32c2
+- esp32c3
+- esp32c5
+- esp32c6
+- esp32c61
+- esp32s2
+- esp32s3
+- esp32h2
+- esp32p4
+url: https://github.com/YOUR_GITHUB_USER/esp32-udp-logger
+version: 1.0.0

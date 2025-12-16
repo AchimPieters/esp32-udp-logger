@@ -1,0 +1,63 @@
+menu "esp32-udp-logger"
+
+config ESP32_UDP_LOGGER_ENABLED
+    bool "Enable esp32-udp-logger"
+    default y
+
+config ESP32_UDP_LOGGER_PORT
+    int "UDP log port (TX)"
+    default 9999
+    range 1 65535
+    depends on ESP32_UDP_LOGGER_ENABLED
+
+config ESP32_UDP_LOGGER_RX_PORT
+    int "UDP command port (RX)"
+    default 9998
+    range 1 65535
+    depends on ESP32_UDP_LOGGER_ENABLED
+
+config ESP32_UDP_LOGGER_MAX_LINE
+    int "Max log line length"
+    default 256
+    range 64 2048
+    depends on ESP32_UDP_LOGGER_ENABLED
+
+config ESP32_UDP_LOGGER_QUEUE_DEPTH
+    int "Queue depth (# of buffered log lines)"
+    default 32
+    range 4 256
+    depends on ESP32_UDP_LOGGER_ENABLED
+
+config ESP32_UDP_LOGGER_TASK_STACK
+    int "Sender task stack (bytes)"
+    default 3072
+    range 2048 16384
+    depends on ESP32_UDP_LOGGER_ENABLED
+
+config ESP32_UDP_LOGGER_TASK_PRIO
+    int "Sender task priority"
+    default 3
+    range 1 24
+    depends on ESP32_UDP_LOGGER_ENABLED
+
+config ESP32_UDP_LOGGER_DROP_ON_FULL
+    bool "Drop logs if queue is full"
+    default y
+    depends on ESP32_UDP_LOGGER_ENABLED
+
+config ESP32_UDP_LOGGER_PREFIX_DEVICE
+    bool "Prefix each line with [hostname]"
+    default y
+    depends on ESP32_UDP_LOGGER_ENABLED
+
+config ESP32_UDP_LOGGER_ENABLE_MDNS
+    bool "Enable mDNS hostname (esp32-udp-logger-XXXX.local)"
+    default y
+    depends on ESP32_UDP_LOGGER_ENABLED
+
+config ESP32_UDP_LOGGER_SERVICE
+    bool "Advertise mDNS service _esp32udplog._udp"
+    default y
+    depends on ESP32_UDP_LOGGER_ENABLE_MDNS
+
+endmenu
