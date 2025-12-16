@@ -1,4 +1,3 @@
-\
 #include "esp32_udp_logger.h"
 
 #include <string.h>
@@ -67,6 +66,9 @@ static int (*s_prev_vprintf)(const char *fmt, va_list ap) = NULL;
 static bool s_hooked = false;
 
 static char s_hostname[32] = {0};
+
+static void tx_task(void *arg);
+static void rx_task(void *arg);
 
 static void lock_take(void){ if (s_lock) (void)xSemaphoreTake(s_lock, portMAX_DELAY); }
 static void lock_give(void){ if (s_lock) (void)xSemaphoreGive(s_lock); }
@@ -237,6 +239,151 @@ static void start_hook_if_needed(void)
   s_hooked = true;
 }
 
+static bool parse_ip_port(const char *ip, const char *port_str, struct sockaddr_in *out)
+{
+  if (!ip || !port_str || !out) return false;
+
+  int port = atoi(port_str);
+  if (port <= 0 || port > 65535) return false;
+
+  struct in_addr a;
+  if (inet_pton(AF_INET, ip, &a) != 1) return false;
+
+  memset(out, 0, sizeof(*out));
+  out->sin_family = AF_INET;
+  out->sin_port = htons((uint16_t)port);
+  out->sin_addr = a;
+  return true;
+}
+
+static void rx_reply(const char *msg, const struct sockaddr *to, socklen_t tolen)
+{
+  if (s_rx_sock < 0 || !msg || !to) return;
+  (void)sendto(s_rx_sock, msg, strlen(msg), 0, to, tolen);
+}
+
+static void tx_task(void *arg)
+{
+  (void)arg;
+  log_item_t item;
+
+  for (;;) {
+    if (xQueueReceive(s_q, &item, portMAX_DELAY) != pdTRUE) continue;
+
+    lock_take();
+    int sock = s_tx_sock;
+    dest_mode_t mode = s_mode;
+    bool bcast_ok = s_bcast_enabled && s_bcast_ready;
+    struct sockaddr_in bdest = s_bcast;
+    bool u_ok = s_unicast_ready;
+    struct sockaddr_in udest = s_unicast;
+    lock_give();
+
+    if (sock < 0) continue;
+
+    if (mode == DEST_UNICAST && u_ok) {
+      (void)sendto(sock, item.data, item.len, 0,
+                   (struct sockaddr *)&udest, sizeof(udest));
+    } else if (bcast_ok) {
+      int yes = 1;
+      (void)setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
+      (void)sendto(sock, item.data, item.len, 0,
+                   (struct sockaddr *)&bdest, sizeof(bdest));
+    }
+  }
+}
+
+static void rx_task(void *arg)
+{
+  (void)arg;
+  char buf[512];
+
+  for (;;) {
+    struct sockaddr_in from;
+    socklen_t flen = sizeof(from);
+    int n = recvfrom(s_rx_sock, buf, sizeof(buf) - 1, 0, (struct sockaddr *)&from, &flen);
+    if (n <= 0) continue;
+    buf[n] = 0;
+
+    char *argv[4] = {0};
+    int argc = 0;
+    char *p = buf;
+    while (*p && argc < 4) {
+      while (*p == ' ' || *p == '\r' || *p == '\n' || *p == '\t') p++;
+      if (!*p) break;
+      argv[argc++] = p;
+      while (*p && *p != ' ' && *p != '\r' && *p != '\n' && *p != '\t') p++;
+      if (*p) *p++ = 0;
+    }
+    if (argc == 0) continue;
+
+    if (!strcmp(argv[0], "bind") && argc >= 3) {
+      struct sockaddr_in u;
+      if (!parse_ip_port(argv[1], argv[2], &u)) {
+        rx_reply("ERR usage: bind <ipv4> <port>\n", (struct sockaddr *)&from, flen);
+        continue;
+      }
+      lock_take();
+      s_unicast = u;
+      s_unicast_ready = true;
+      s_mode = DEST_UNICAST;
+      lock_give();
+      rx_reply("OK bound\n", (struct sockaddr *)&from, flen);
+      continue;
+    }
+
+    if (!strcmp(argv[0], "unbind")) {
+      lock_take();
+      s_mode = DEST_BROADCAST;
+      lock_give();
+      rx_reply("OK unbound\n", (struct sockaddr *)&from, flen);
+      continue;
+    }
+
+    if (!strcmp(argv[0], "broadcast") && argc >= 2) {
+      bool on = (!strcmp(argv[1], "on") || !strcmp(argv[1], "1"));
+      bool off = (!strcmp(argv[1], "off") || !strcmp(argv[1], "0"));
+      if (!on && !off) {
+        rx_reply("ERR usage: broadcast on|off\n", (struct sockaddr *)&from, flen);
+        continue;
+      }
+      lock_take();
+      s_bcast_enabled = on;
+      lock_give();
+      rx_reply(on ? "OK broadcast on\n" : "OK broadcast off\n", (struct sockaddr *)&from, flen);
+      continue;
+    }
+
+    if (!strcmp(argv[0], "status")) {
+      char msg[220];
+      lock_take();
+      const char *mode = (s_mode == DEST_UNICAST) ? "unicast" : "broadcast";
+      bool b = s_bcast_enabled;
+      uint32_t drops = s_drop_count;
+      bool uok = s_unicast_ready;
+      struct sockaddr_in u = s_unicast;
+      lock_give();
+
+      char ipbuf[16] = {0};
+      if (uok) inet_ntop(AF_INET, &u.sin_addr, ipbuf, sizeof(ipbuf));
+
+      snprintf(msg, sizeof(msg),
+               "host=%s mode=%s broadcast=%s drops=%lu unicast=%s:%u\n",
+               s_hostname[0] ? s_hostname : "(pending)",
+               mode,
+               b ? "on" : "off",
+               (unsigned long)drops,
+               uok ? ipbuf : "-",
+               uok ? (unsigned)ntohs(u.sin_port) : 0u);
+
+      rx_reply(msg, (struct sockaddr *)&from, flen);
+      continue;
+    }
+
+    rx_reply("ERR unknown command\n", (struct sockaddr *)&from, flen);
+  }
+}
+
 static void maybe_start_tasks_locked(void)
 {
   if (s_started) return;
@@ -249,35 +396,7 @@ static void maybe_start_tasks_locked(void)
 
   if (!s_tx_task) {
     BaseType_t ok = xTaskCreate(
-      [](void *arg){
-        (void)arg;
-        log_item_t item;
-
-        for (;;) {
-          if (xQueueReceive(s_q, &item, portMAX_DELAY) != pdTRUE) continue;
-
-          lock_take();
-          int sock = s_tx_sock;
-          dest_mode_t mode = s_mode;
-          bool bcast_ok = s_bcast_enabled && s_bcast_ready;
-          struct sockaddr_in bdest = s_bcast;
-          bool u_ok = s_unicast_ready;
-          struct sockaddr_in udest = s_unicast;
-          lock_give();
-
-          if (sock < 0) continue;
-
-          if (mode == DEST_UNICAST && u_ok) {
-            (void)sendto(sock, item.data, item.len, 0,
-                         (struct sockaddr *)&udest, sizeof(udest));
-          } else if (bcast_ok) {
-            int yes = 1;
-            (void)setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
-            (void)sendto(sock, item.data, item.len, 0,
-                         (struct sockaddr *)&bdest, sizeof(bdest));
-          }
-        }
-      },
+      tx_task,
       "udp_log_tx",
       CONFIG_ESP32_UDP_LOGGER_TASK_STACK,
       NULL,
@@ -292,113 +411,7 @@ static void maybe_start_tasks_locked(void)
 
   if (!s_rx_task && s_rx_sock >= 0) {
     BaseType_t ok = xTaskCreate(
-      [](void *arg){
-        (void)arg;
-        char buf[512];
-
-        auto reply = [](const char *msg, const struct sockaddr *to, socklen_t tolen){
-          if (s_rx_sock < 0 || !msg) return;
-          (void)sendto(s_rx_sock, msg, strlen(msg), 0, to, tolen);
-        };
-
-        auto parse_ip_port = [](const char *ip, const char *port_str, struct sockaddr_in *out)->bool {
-          if (!ip || !port_str || !out) return false;
-          int port = atoi(port_str);
-          if (port <= 0 || port > 65535) return false;
-          struct in_addr a;
-          if (inet_pton(AF_INET, ip, &a) != 1) return false;
-          memset(out, 0, sizeof(*out));
-          out->sin_family = AF_INET;
-          out->sin_port = htons((uint16_t)port);
-          out->sin_addr = a;
-          return true;
-        };
-
-        for (;;) {
-          struct sockaddr_in from;
-          socklen_t flen = sizeof(from);
-          int n = recvfrom(s_rx_sock, buf, sizeof(buf)-1, 0, (struct sockaddr *)&from, &flen);
-          if (n <= 0) continue;
-          buf[n] = 0;
-
-          char *argv[4] = {0};
-          int argc = 0;
-          char *p = buf;
-          while (*p && argc < 4) {
-            while (*p == ' ' || *p == '\r' || *p == '\n' || *p == '\t') p++;
-            if (!*p) break;
-            argv[argc++] = p;
-            while (*p && *p != ' ' && *p != '\r' && *p != '\n' && *p != '\t') p++;
-            if (*p) *p++ = 0;
-          }
-          if (argc == 0) continue;
-
-          if (!strcmp(argv[0], "bind") && argc >= 3) {
-            struct sockaddr_in u;
-            if (!parse_ip_port(argv[1], argv[2], &u)) {
-              reply("ERR usage: bind <ipv4> <port>\n", (struct sockaddr *)&from, flen);
-              continue;
-            }
-            lock_take();
-            s_unicast = u;
-            s_unicast_ready = true;
-            s_mode = DEST_UNICAST;
-            lock_give();
-            reply("OK bound\n", (struct sockaddr *)&from, flen);
-            continue;
-          }
-
-          if (!strcmp(argv[0], "unbind")) {
-            lock_take();
-            s_mode = DEST_BROADCAST;
-            lock_give();
-            reply("OK unbound\n", (struct sockaddr *)&from, flen);
-            continue;
-          }
-
-          if (!strcmp(argv[0], "broadcast") && argc >= 2) {
-            bool on = (!strcmp(argv[1], "on") || !strcmp(argv[1], "1"));
-            bool off = (!strcmp(argv[1], "off") || !strcmp(argv[1], "0"));
-            if (!on && !off) {
-              reply("ERR usage: broadcast on|off\n", (struct sockaddr *)&from, flen);
-              continue;
-            }
-            lock_take();
-            s_bcast_enabled = on;
-            lock_give();
-            reply(on ? "OK broadcast on\n" : "OK broadcast off\n", (struct sockaddr *)&from, flen);
-            continue;
-          }
-
-          if (!strcmp(argv[0], "status")) {
-            char msg[220];
-            lock_take();
-            const char *mode = (s_mode == DEST_UNICAST) ? "unicast" : "broadcast";
-            bool b = s_bcast_enabled;
-            uint32_t drops = s_drop_count;
-            bool uok = s_unicast_ready;
-            struct sockaddr_in u = s_unicast;
-            lock_give();
-
-            char ipbuf[16] = {0};
-            if (uok) inet_ntop(AF_INET, &u.sin_addr, ipbuf, sizeof(ipbuf));
-
-            snprintf(msg, sizeof(msg),
-                     "host=%s mode=%s broadcast=%s drops=%lu unicast=%s:%u\n",
-                     s_hostname[0] ? s_hostname : "(pending)",
-                     mode,
-                     b ? "on" : "off",
-                     (unsigned long)drops,
-                     uok ? ipbuf : "-",
-                     uok ? (unsigned)ntohs(u.sin_port) : 0u);
-
-            reply(msg, (struct sockaddr *)&from, flen);
-            continue;
-          }
-
-          reply("ERR unknown command\n", (struct sockaddr *)&from, flen);
-        }
-      },
+      rx_task,
       "udp_log_rx",
       3072,
       NULL,
