@@ -82,20 +82,27 @@ def pick_device(devices: List[Device]) -> Device:
 
 def send_udp_cmd(ip: str, port: int, cmd: str, expect_reply: bool = True, reply_timeout_s: float = 1.0) -> str:
     cmd_bytes = cmd.encode("utf-8", errors="replace")
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.settimeout(reply_timeout_s)
-        s.bind(("", 0))
-        try:
-            s.sendto(cmd_bytes, (ip, port))
-            if not expect_reply:
-                return ""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(reply_timeout_s)
             try:
-                data, _ = s.recvfrom(2048)
-                return data.decode("utf-8", errors="replace")
-            except socket.timeout:
-                return ""
-        except OSError as e:
-            raise SystemExit(f"Network error sending command to {ip}:{port}: {e}") from e
+                s.bind(("", 0))
+            except OSError as e:
+                raise SystemExit(f"Failed to bind local UDP socket: {e}") from e
+
+            try:
+                s.sendto(cmd_bytes, (ip, port))
+                if not expect_reply:
+                    return ""
+                try:
+                    data, _ = s.recvfrom(2048)
+                    return data.decode("utf-8", errors="replace")
+                except socket.timeout:
+                    return ""
+            except OSError as e:
+                raise SystemExit(f"Network error sending command to {ip}:{port}: {e}") from e
+    except OSError as e:
+        raise SystemExit(f"Failed to create UDP socket: {e}") from e
 
 def get_local_ip_for_target(target_ip: str) -> str:
     try:
@@ -107,15 +114,22 @@ def get_local_ip_for_target(target_ip: str) -> str:
 
 def listen_logs(port: int) -> None:
     print(f"Listening for UDP logs on 0.0.0.0:{port} (Ctrl+C to stop)")
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(("", port))
-        while True:
-            data, _ = s.recvfrom(65535)
-            txt = data.decode("utf-8", errors="replace")
-            sys.stdout.write(txt)
-            if not txt.endswith("\n"):
-                sys.stdout.write("\n")
-            sys.stdout.flush()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            try:
+                s.bind(("", port))
+            except OSError as e:
+                raise SystemExit(f"Failed to bind UDP listener on port {port}: {e}") from e
+
+            while True:
+                data, _ = s.recvfrom(65535)
+                txt = data.decode("utf-8", errors="replace")
+                sys.stdout.write(txt)
+                if not txt.endswith("\n"):
+                    sys.stdout.write("\n")
+                sys.stdout.flush()
+    except OSError as e:
+        raise SystemExit(f"Failed to create UDP socket for listening: {e}") from e
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="esp32-udp-logger-cli")
