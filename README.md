@@ -132,112 +132,12 @@ $rxPort=9998
 $pcIp="YOUR_PC_IP"
 $txPort=9999
 $udp = New-Object System.Net.Sockets.UdpClient
-$udp.Send([Text.Encoding]::UTF8.GetBytes("bind $pcIp $txPort"), ("bind $pcIp $txPort").Length, $device, $rxPort) | Out-Null
-$udp.Close()
-```
-
-After binding:
-- that ESP32 will send logs **unicast** to your PC
-- optionally turn off broadcast for that device:
-
-```bash
-echo "broadcast off" | nc -u -w1 esp32-udp-logger-7A3F.local 9998
-```
-
-## 4) Status / Unbind
-
-Status:
-```bash
-echo "status" | nc -u -w1 esp32-udp-logger-7A3F.local 9998
-```
-
-Unbind (back to broadcast):
-```bash
-echo "unbind" | nc -u -w1 esp32-udp-logger-7A3F.local 9998
+$cmd = [System.Text.Encoding]::ASCII.GetBytes("bind $pcIp $txPort")
+$udp.Send($cmd, $cmd.Length, $device, $rxPort)
 ```
 
 ---
 
-# Super easy mode: cross-platform CLI (recommended)
+## License
 
-This repo includes a Python CLI that works on **macOS / Linux / Windows**.
-
-## Install
-```bash
-python -m pip install zeroconf
-```
-
-## List devices
-```bash
-python tools/esp32_udp_logger_cli.py list
-```
-
-## Interactive picker
-```bash
-python tools/esp32_udp_logger_cli.py pick
-```
-
-## Bind device
-```bash
-python tools/esp32_udp_logger_cli.py bind esp32-udp-logger-7A3F
-```
-
-## Listen logs (built-in)
-```bash
-python tools/esp32_udp_logger_cli.py listen --port 9999
-```
-
----
-
-# Commands reference (UDP RX port 9998)
-
-Commands are simple ASCII:
-
-- `bind <ipv4> <port>`  → switch to unicast destination
-- `unbind`              → switch back to broadcast
-- `broadcast on|off`    → enable/disable broadcast sending
-- `status`              → get current mode + drop count
-
-Example:
-```bash
-echo "bind 192.168.1.10 9999" | nc -u -w1 esp32-udp-logger-7A3F.local 9998
-```
-
----
-
-# Troubleshooting
-
-## I see no logs
-- Make sure your ESP32 actually has Wi‑Fi/Ethernet and got an IP
-- Make sure your PC is on the same subnet (broadcast is subnet-local)
-- Try the Python listener:
-  ```bash
-  python tools/esp32_udp_logger_cli.py listen
-  ```
-
-## Crash/assert around socket creation (Invalid mbox)
-If your app already sets up networking/LwIP, disable:
-`Component config → esp32-udp-logger → Call esp_netif_init() in esp32_udp_logger_autostart()`.
-
-Also ensure LwIP allows enough UDP sockets for your app + logger. This component uses two UDP sockets (TX + RX), so increase:
-`Component config → LWIP → UDP → The maximum number of active UDP "connections"` (for example 2 or more).
-
-
-## `list` shows no devices
-mDNS can be blocked:
-- macOS: usually works out of the box
-- Linux: ensure Avahi is running (common on desktop distros)
-- Windows: allow Python through firewall on Private networks
-
-## I have Wi‑Fi but broadcast doesn’t arrive
-Some networks block broadcast/multicast. In that case:
-- bind the device to your PC by IP (unicast):
-  ```bash
-  python tools/esp32_udp_logger_cli.py bind esp32-udp-logger-7A3F --pc-ip YOUR_PC_IP
-  ```
-- or update your router/AP settings.
-
----
-
-# License
-MIT
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
