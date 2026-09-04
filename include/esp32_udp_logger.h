@@ -31,6 +31,7 @@ void esp32_udp_logger_unbind(void);
 void esp32_udp_logger_set_broadcast(bool enable);
 
 uint32_t esp32_udp_logger_get_drop_count(void);
+int esp32_udp_logger_set_hostname(const char *str);
 const char *esp32_udp_logger_get_hostname(void);
 
 #ifdef __cplusplus

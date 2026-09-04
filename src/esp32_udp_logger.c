@@ -25,10 +25,6 @@
 
 #include "sdkconfig.h"
 
-#ifndef CONFIG_ESP32_UDP_LOGGER_ENABLED
-#define CONFIG_ESP32_UDP_LOGGER_ENABLED 1
-#endif
-
 #if CONFIG_ESP32_UDP_LOGGER_ENABLED
 
 typedef struct {
@@ -82,6 +78,15 @@ static void make_hostname_once(void)
     (void)esp_read_mac(mac, ESP_MAC_EFUSE_FACTORY);
   }
   snprintf(s_hostname, sizeof(s_hostname), "esp32-udp-logger-%02X%02X", mac[4], mac[5]);
+}
+
+int esp32_udp_logger_set_hostname(const char *str)
+{
+  if (!str || s_hostname[0] != 0) return -1;
+
+  snprintf(s_hostname, sizeof(s_hostname), str);
+  
+  return 0;
 }
 
 const char *esp32_udp_logger_get_hostname(void)
